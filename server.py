@@ -113,8 +113,6 @@ class OriginChatsServer:
                         listener = None
                     # Handle message
                     response = await message_handler.handle(websocket, data, server_data)
-                    if listener:
-                        response.listener = listener
                     
                     if not response:
                         Logger.warning(f"No response for message: {data}")
@@ -131,6 +129,8 @@ class OriginChatsServer:
                         continue
                     
                     if response:
+                        if listener:
+                            response.listener = listener
                         await send_to_client(websocket, response)
 
                 except json.JSONDecodeError:
