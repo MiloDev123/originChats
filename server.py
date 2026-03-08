@@ -1,5 +1,7 @@
-import asyncio, websockets, json, os
-from aiohttp import web
+import asyncio, websockets, json, os, mimetypes
+from urllib.parse import urlsplit, unquote
+from websockets.datastructures import Headers
+from websockets.http11 import Response
 from handlers.websocket_utils import send_to_client, heartbeat, broadcast_to_all, broadcast_to_channel, broadcast_to_voice_channel, broadcast_to_voice_channel_with_viewers
 from handlers.auth import handle_authentication
 from handlers import message as message_handler
@@ -24,8 +26,6 @@ class OriginChatsServer:
         self.main_event_loop = None
         self.file_observer = None
         self.slash_commands = {}
-        self.http_runner = None
-        self.http_site = None
         
         self.voice_channels = {}
         
@@ -49,56 +49,84 @@ class OriginChatsServer:
         else:
             Logger.warning("Rate limiting disabled")
 
-    async def _handle_emoji_image(self, request):
+    def _resolve_emoji_file_path(self, file_name):
         """
-        Serve custom emoji image files from db/serverEmojis
+        Resolve and validate custom emoji file path in db/serverEmojis.
+        Returns absolute file path or None when invalid/missing.
         """
-        file_name = request.match_info.get("filename", "").strip()
         if not file_name:
-            raise web.HTTPNotFound(text="Emoji not found")
+            return None
 
         if file_name != os.path.basename(file_name) or file_name.startswith("."):
-            raise web.HTTPNotFound(text="Emoji not found")
+            return None
 
         if not serverEmojis.is_allowed_file_type(file_name):
-            raise web.HTTPNotFound(text="Emoji not found")
+            return None
 
         emoji_dir = os.path.join(os.path.dirname(__file__), "db", "serverEmojis")
         file_path = os.path.normpath(os.path.join(emoji_dir, file_name))
         emoji_dir_norm = os.path.normpath(emoji_dir)
 
         if not file_path.startswith(emoji_dir_norm + os.sep):
-            raise web.HTTPNotFound(text="Emoji not found")
+            return None
 
         if not os.path.isfile(file_path):
-            raise web.HTTPNotFound(text="Emoji not found")
+            return None
 
-        response = web.FileResponse(path=file_path)
-        response.headers["Cache-Control"] = "public, max-age=3600"
-        return response
+        return file_path
 
-    async def _start_http_server(self, host, ws_port):
+    def _serve_file_response(self, file_path, cache_control="public, max-age=3600"):
+        with open(file_path, "rb") as f:
+            body = f.read()
+
+        content_type, _ = mimetypes.guess_type(file_path)
+        if not content_type:
+            content_type = "application/octet-stream"
+
+        return Response(
+            200,
+            "OK",
+            Headers(
+                [
+                    ("Content-Type", content_type),
+                    ("Content-Length", str(len(body))),
+                    ("Cache-Control", cache_control),
+                ]
+            ),
+            body,
+        )
+
+    async def _process_http_request(self, connection, request):
         """
-        Start HTTP endpoints for static server assets
+        Serve HTTP emoji assets on the same socket as WebSocket traffic.
         """
-        http_config = self.config.get("http", {})
-        http_enabled = http_config.get("enabled", True)
-        if not http_enabled:
-            Logger.warning("HTTP server disabled in config")
-            return
+        path = urlsplit(request.path).path
+        if path in ("/", "/index.html"):
+            index_path = os.path.join(os.path.dirname(__file__), "index.html")
+            if not os.path.isfile(index_path):
+                return Response(
+                    404,
+                    "Not Found",
+                    Headers([("Content-Type", "text/plain; charset=utf-8")]),
+                    b"index.html not found",
+                )
+            return self._serve_file_response(index_path, cache_control="no-cache")
 
-        http_host = http_config.get("host", host)
-        http_port = int(http_config.get("port", ws_port + 1))
+        if not path.startswith("/emojis/"):
+            return None
 
-        app = web.Application()
-        app.router.add_get("/emojis/{filename}", self._handle_emoji_image)
+        file_name = unquote(path[len("/emojis/"):]).strip()
+        file_path = self._resolve_emoji_file_path(file_name)
+        if not file_path:
+            return Response(
+                404,
+                "Not Found",
+                Headers([("Content-Type", "text/plain; charset=utf-8")]),
+                b"Emoji not found",
+            )
 
-        self.http_runner = web.AppRunner(app)
-        await self.http_runner.setup()
-        self.http_site = web.TCPSite(self.http_runner, http_host, http_port)
-        await self.http_site.start()
-        Logger.success(f"HTTP emoji endpoint running at http://{http_host}:{http_port}/emojis/{{filename}}")
-    
+        return self._serve_file_response(file_path, cache_control="public, max-age=3600")
+
     async def handle_client(self, websocket):
         """WebSocket connection handler"""
         # Get client info
@@ -254,7 +282,6 @@ class OriginChatsServer:
         host = self.config.get("websocket", {}).get("host", "127.0.0.1")
         
         Logger.info(f"Starting WebSocket server on {host}:{port}")
-        await self._start_http_server(host, port)
         
         # Trigger server_start event for plugins
         server_data = {
@@ -266,16 +293,18 @@ class OriginChatsServer:
         self.plugin_manager.trigger_event("server_start", None, {}, server_data)
         
         try:
-            async with websockets.serve(self.handle_client, host, port, ping_interval=None):
+            async with websockets.serve(
+                self.handle_client,
+                host,
+                port,
+                ping_interval=None,
+                process_request=self._process_http_request,
+            ):
                 Logger.success(f"WebSocket server running at ws://{host}:{port}")
                 
                 # Keep the server running
                 await asyncio.Future()
         finally:
-            if self.http_runner:
-                await self.http_runner.cleanup()
-                Logger.info("HTTP server stopped")
-
             # Stop file watcher when server stops
             if self.file_observer:
                 self.file_observer.stop()
