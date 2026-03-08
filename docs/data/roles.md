@@ -16,4 +16,4 @@ Example role object:
 - `color`: Hex color code for UI display.
 - `description`: Description of the role.
 
-Roles are referenced in permissions and user objects. See also: [permissions](permissions.md)
+Roles are used in [channel permissions](permissions.md) to control access to actions such as `view`, `send`, `delete`, `pin`, `react`, and more.

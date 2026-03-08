@@ -378,7 +378,7 @@ def can_user_pin(channel_name, user_roles):
             if channel.get("name") == channel_name:
                 permissions = channel.get("permissions", {})
                 if "pin" not in permissions:
-                    return True # Default: owner can pin
+                    return "owner" in user_roles  # Default: only owner can pin
                 allowed_roles = permissions.get("pin", [])
                 return any(role in allowed_roles for role in user_roles)
     except FileNotFoundError:

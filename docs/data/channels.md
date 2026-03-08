@@ -16,7 +16,9 @@ A channel object represents a chat channel in OriginChats. Channels can be text 
     "send": ["user"],
     "delete": ["admin", "moderator"],
     "delete_own": ["user"],
-    "edit_own": ["user"]
+    "edit_own": ["user"],
+    "pin": ["admin"],
+    "react": ["user"]
   }
 }
 ```
@@ -34,6 +36,7 @@ A channel object represents a chat channel in OriginChats. Channels can be text 
   - `delete`: Roles that can delete any message.
   - `delete_own`: (optional) Roles allowed to delete their own messages. If not present, all roles can delete their own messages by default.
   - `edit_own`: (optional) Roles allowed to edit their own messages. If not present, all roles can edit their own messages by default.
+  - `pin`: (optional) Roles allowed to pin messages in the channel. If not present, only the owner can pin messages by default.
   - `react`: (optional) Roles allowed to add/remove reactions.
 
 ---

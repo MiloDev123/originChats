@@ -19,6 +19,8 @@ Example:
 - `delete`: Roles that can delete any message.
 - `delete_own`: Roles that can delete their own messages. If omitted, all roles can delete their own messages by default.
 - `edit_own`: Roles that can edit their own messages. If omitted, all roles can edit their own messages by default.
+- `pin`: Roles that can pin messages in the channel. If omitted, only the owner can pin messages by default.
+- `react`: Roles that can add/remove reactions to messages.
 
 If a role is not listed for an action, users with that role cannot perform the action (except for `delete_own` and `edit_own` as noted above).
 
