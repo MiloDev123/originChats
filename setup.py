@@ -1,4 +1,4 @@
-import os, json, sys
+import os, json, sys, shutil
 from logger import Logger
 from config_builder import DEFAULT_CONFIG, build_config
 
@@ -26,7 +26,7 @@ def yes_no(prompt, default="y"):
 
 def setup_directories():
     """Create necessary directories if they don't exist"""
-    directories = ["db", "db/backup"]
+    directories = ["db", "db/backup", "db/serverAssets"]
     for directory in directories:
         if not os.path.exists(directory):
             os.makedirs(directory)
@@ -86,6 +86,32 @@ def create_default_files():
             json.dump(default_roles, f, indent=4)
         Logger.add(f"Created {roles_file}")
 
+def _prepare_server_asset_input(prompt_text):
+    candidate = get_input(prompt_text).strip()
+    if not candidate:
+        return None
+
+    assets_dir = os.path.join(os.path.dirname(__file__), "db", "serverAssets")
+    os.makedirs(assets_dir, exist_ok=True)
+
+    if os.path.dirname(candidate):
+        source = os.path.normpath(candidate)
+        if not os.path.isabs(source):
+            source = os.path.normpath(os.path.join(os.getcwd(), source))
+        if not os.path.isfile(source):
+            Logger.warning(f"Server asset not found at {candidate}")
+            return None
+        dest = os.path.join(assets_dir, os.path.basename(source))
+        shutil.copy2(source, dest)
+        return os.path.basename(source)
+
+    target = os.path.join(assets_dir, candidate)
+    if not os.path.isfile(target):
+        Logger.warning(f"Server asset not found in db/serverAssets: {candidate}")
+        return None
+    return candidate
+
+
 def main():
     """Main setup function"""
     print()
@@ -107,8 +133,9 @@ def main():
     # Server configuration
     print("--- Server Configuration ---")
     server_name = get_input("Server name", DEFAULT_CONFIG["server"]["name"])
-    server_icon = get_input("Server icon URL (optional)")
-    server_url = get_input("Server URL (optional)")
+    server_icon = _prepare_server_asset_input("Server icon filename or source path (optional)")
+    server_banner = _prepare_server_asset_input("Server banner filename or source path (optional)")
+    server_url = get_input("Server URL (optional, used for hosted icon/banner links)")
     owner_name = get_input("Server owner name", DEFAULT_CONFIG["server"]["owner"]["name"])
     
     print()
@@ -160,19 +187,32 @@ def main():
         print("[OriginChats Setup] No valid emoji file extensions provided, using defaults")
         emoji_allowed_file_types = DEFAULT_CONFIG["uploads"]["emoji_allowed_file_types"]
 
-    config = build_config(
-        server_name=server_name,
-        owner_name=owner_name,
-        ws_host=ws_host,
-        ws_port=ws_port,
-        rotur_url=rotur_url,
-        rotur_key=rotur_key,
-        max_message_length=max_message_length,
-        search_results_limit=search_results_limit,
-        server_icon=server_icon,
-        server_url=server_url,
-        emoji_allowed_file_types=emoji_allowed_file_types,
-    )
+    config = build_config({
+        "server": {
+            "name": server_name,
+            "owner": {
+                "name": owner_name,
+            },
+            "icon": server_icon or None,
+            "banner": server_banner or None,
+            "url": server_url or None,
+        },
+        "websocket": {
+            "host": ws_host,
+            "port": ws_port,
+        },
+        "rotur": {
+            "validate_url": rotur_url,
+            "validate_key": rotur_key,
+        },
+        "limits": {
+            "post_content": max_message_length,
+            "search_results": search_results_limit,
+        },
+        "uploads": {
+            "emoji_allowed_file_types": emoji_allowed_file_types,
+        },
+    })
     
     # Create directories and files
     print()

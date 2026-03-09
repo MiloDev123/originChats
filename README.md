@@ -181,7 +181,7 @@ See `plugins/` directory for examples. Plugins can:
 Use the same 3-step flow throughout the codebase:
 
 1. Add the default in `config_builder.py`.
-2. If it should be configurable during setup, prompt for it in `setup.py` and pass it into `build_config(...)`.
+2. If it should be configurable during setup, prompt for it in `setup.py` and add it to the overrides passed into `build_config(...)`.
 3. Read it with `get_config_value(...)` from `config_store.py`, or use the local handler helper when `server_data["config"]` is already available.
 
 ## API Protocol

@@ -67,9 +67,11 @@ This file contains the main configuration for the OriginChats server. Below is a
   - **name**: *(str)*
     - Name of the server owner.
 - **icon**: *(str)*
-  - URL to the server icon image.
+  - URL to the server icon image, or the filename of a file already stored in `db/serverAssets`; it will be exposed as `/server-assets/icon`.
+- **banner**: *(str)*
+  - URL to the server banner image, or the filename of a file already stored in `db/serverAssets`; it will be exposed as `/server-assets/banner`.
 - **url**: *(str)*
-  - Public URL of the server.
+  - Public base URL of the server, used to build hosted links for local server icon and banner files.
 
 ---
 
@@ -78,7 +80,7 @@ This file contains the main configuration for the OriginChats server. Below is a
 When adding a new config value, follow these 3 steps:
 
 1. Add the default value in `config_builder.py` under `DEFAULT_CONFIG`.
-2. If it should be set during setup, add a prompt in `setup.py` and pass the parsed value into `build_config(...)`.
+2. If it should be set during setup, add a prompt in `setup.py` and add the parsed value to the overrides passed into `build_config(...)`.
 3. Read it in runtime code through `get_config_value(...)` from `config_store.py`, or through the local `_config_value(...)` helper in handlers when `server_data["config"]` is already available.
 
 Example:

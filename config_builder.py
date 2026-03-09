@@ -54,69 +54,23 @@ def _deep_merge(base, overrides):
     return base
 
 
-def build_config(
-    server_name=None,
-    owner_name=None,
-    ws_host=None,
-    ws_port=None,
-    rotur_url=None,
-    rotur_key=None,
-    max_message_length=None,
-    search_results_limit=None,
-    server_icon=None,
-    server_url=None,
-    emoji_allowed_file_types=None,
-    overrides=None,
-):
+def _remove_none_values(data):
+    cleaned = {}
+    for key, value in data.items():
+        if isinstance(value, dict):
+            nested = _remove_none_values(value)
+            if nested:
+                cleaned[key] = nested
+            continue
+        if value is not None:
+            cleaned[key] = value
+    return cleaned
+
+
+def build_config(overrides=None):
     config = deepcopy(DEFAULT_CONFIG)
 
-    direct_updates = {
-        "limits": {
-            "post_content": max_message_length,
-            "search_results": search_results_limit,
-        },
-        "websocket": {
-            "host": ws_host,
-            "port": ws_port,
-        },
-        "rotur": {
-            "validate_url": rotur_url,
-            "validate_key": rotur_key,
-        },
-        "server": {
-            "name": server_name,
-            "owner": {
-                "name": owner_name,
-            },
-        },
-        "uploads": {
-            "emoji_allowed_file_types": emoji_allowed_file_types,
-        },
-    }
-
-    for section, values in direct_updates.items():
-        if not isinstance(values, dict):
-            continue
-        for key, value in list(values.items()):
-            if isinstance(value, dict):
-                nested_values = {nested_key: nested_value for nested_key, nested_value in value.items() if nested_value is not None}
-                if nested_values:
-                    config[section][key].update(nested_values)
-                continue
-            if value is not None:
-                config[section][key] = value
-
-    if server_icon:
-        config["server"]["icon"] = server_icon
-    else:
-        config["server"].pop("icon", None)
-
-    if server_url:
-        config["server"]["url"] = server_url
-    else:
-        config["server"].pop("url", None)
-
     if overrides:
-        _deep_merge(config, overrides)
+        _deep_merge(config, _remove_none_values(overrides))
 
     return config

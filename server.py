@@ -28,6 +28,9 @@ class OriginChatsServer:
         self.slash_commands = {}
         
         self.voice_channels = {}
+        self.server_assets_dir = os.path.join(os.path.dirname(__file__), "db", "serverAssets")
+        os.makedirs(self.server_assets_dir, exist_ok=True)
+        self.server_asset_files = {}
         
         # Initialize rate limiter if enabled
         rate_config = self.config.get("rate_limiting", {})
@@ -42,12 +45,69 @@ class OriginChatsServer:
         
         # Initialize plugin manager
         self.plugin_manager = PluginManager()
+        self._configure_server_assets()
         
         Logger.info(f"OriginChats WebSocket Server v{self.version} initialized")
         if self.rate_limiter:
             Logger.info(f"Rate limiting enabled: {rate_config.get('messages_per_minute', 30)} msg/min, burst: {rate_config.get('burst_limit', 5)}")
         else:
             Logger.warning("Rate limiting disabled")
+
+    def _normalize_public_base_url(self):
+        base_url = self.config.get("server", {}).get("url")
+        if base_url:
+            if base_url.startswith("ws://"):
+                return "http://" + base_url[len("ws://"):].rstrip("/")
+            if base_url.startswith("wss://"):
+                return "https://" + base_url[len("wss://"):].rstrip("/")
+            return base_url.rstrip("/")
+
+        host = self.config.get("websocket", {}).get("host", "127.0.0.1")
+        port = self.config.get("websocket", {}).get("port", 5613)
+        return f"http://{host}:{port}"
+
+    def _join_public_url(self, path):
+        return f"{self._normalize_public_base_url().rstrip('/')}/{path.lstrip('/')}"
+
+    def _resolve_server_asset_path(self, file_path):
+        if not file_path or not isinstance(file_path, str):
+            return None
+
+        normalized_path = os.path.normpath(file_path)
+        if not os.path.isabs(normalized_path):
+            normalized_path = os.path.normpath(os.path.join(os.path.dirname(__file__), normalized_path))
+
+        if not os.path.isfile(normalized_path):
+            return None
+
+        content_type, _ = mimetypes.guess_type(normalized_path)
+        if not content_type or not content_type.startswith("image/"):
+            return None
+
+        return normalized_path
+
+    def _register_server_asset(self, asset_name):
+        asset_value = self.config.get("server", {}).get(asset_name)
+        if not asset_value or not isinstance(asset_value, str):
+            self.config.get("server", {}).pop(asset_name, None)
+            return
+
+        if "://" in asset_value:
+            return
+
+        asset_name_only = os.path.basename(asset_value)
+        asset_path = os.path.join(self.server_assets_dir, asset_name_only)
+        if not os.path.isfile(asset_path):
+            Logger.warning(f"Server {asset_name} asset missing in db/serverAssets: {asset_name_only}")
+            self.config.get("server", {}).pop(asset_name, None)
+            return
+
+        self.server_asset_files[asset_name] = asset_path
+        self.config["server"][asset_name] = self._join_public_url(f"/server-assets/{asset_name}")
+
+    def _configure_server_assets(self):
+        self._register_server_asset("icon")
+        self._register_server_asset("banner")
 
     def _resolve_emoji_file_path(self, file_name):
         """
@@ -96,9 +156,12 @@ class OriginChatsServer:
             body,
         )
 
+    def _resolve_server_asset_request(self, asset_name):
+        return self.server_asset_files.get(asset_name)
+
     async def _process_http_request(self, connection, request):
         """
-        Serve HTTP emoji assets on the same socket as WebSocket traffic.
+        Serve HTTP asset files on the same socket as WebSocket traffic.
         """
         upgrade = request.headers.get("Upgrade", "")
         connection_hdr = request.headers.get("Connection", "")
@@ -120,25 +183,36 @@ class OriginChatsServer:
                 )
             return self._serve_file_response(index_path, cache_control="no-cache")
 
-        if not path.startswith("/emojis/"):
-            return Response(
-                404,
-                "Not Found",
-                Headers([("Content-Type", "text/plain; charset=utf-8")]),
-                b"Not found",
-            )
+        if path.startswith("/emojis/"):
+            file_name = unquote(path[len("/emojis/"):]).strip()
+            file_path = self._resolve_emoji_file_path(file_name)
+            if not file_path:
+                return Response(
+                    404,
+                    "Not Found",
+                    Headers([("Content-Type", "text/plain; charset=utf-8")]),
+                    b"Emoji not found",
+                )
+            return self._serve_file_response(file_path, cache_control="public, max-age=3600")
 
-        file_name = unquote(path[len("/emojis/"):]).strip()
-        file_path = self._resolve_emoji_file_path(file_name)
-        if not file_path:
-            return Response(
-                404,
-                "Not Found",
-                Headers([("Content-Type", "text/plain; charset=utf-8")]),
-                b"Emoji not found",
-            )
+        if path.startswith("/server-assets/"):
+            asset_name = path[len("/server-assets/"):].strip("/")
+            file_path = self._resolve_server_asset_request(asset_name)
+            if not file_path:
+                return Response(
+                    404,
+                    "Not Found",
+                    Headers([("Content-Type", "text/plain; charset=utf-8")]),
+                    b"Server asset not found",
+                )
+            return self._serve_file_response(file_path, cache_control="public, max-age=3600")
 
-        return self._serve_file_response(file_path, cache_control="public, max-age=3600")
+        return Response(
+            404,
+            "Not Found",
+            Headers([("Content-Type", "text/plain; charset=utf-8")]),
+            b"Not found",
+        )
 
     async def handle_client(self, websocket):
         """WebSocket connection handler"""
