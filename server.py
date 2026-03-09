@@ -256,19 +256,12 @@ class OriginChatsServer:
                     
                     if user_id and current_voice_channel:
                         if current_voice_channel in self.voice_channels and user_id in self.voice_channels[current_voice_channel]:
+                            msg = {"cmd": "voice_user_left", "channel": current_voice_channel, "username": username}
                             await broadcast_to_voice_channel_with_viewers(
                                 self.connected_clients,
                                 self.voice_channels,
-                                {
-                                    "type": "voice_user_left",
-                                    "channel": current_voice_channel,
-                                    "username": username
-                                },
-                                {
-                                    "type": "voice_user_left",
-                                    "channel": current_voice_channel,
-                                    "username": username
-                                },
+                                msg,
+                                msg,
                                 current_voice_channel
                             )
                             

@@ -135,19 +135,11 @@ async def _broadcast_voice_event(connected_clients, voice_channels, channel_name
     if user_data_without_peer is None:
         user_data_without_peer = {k: v for k, v in user_data_with_peer.items() if k != "peer_id"}
     
+    msg = {"cmd": event_type, "channel": channel_name, "user": user_data_with_peer}
     await broadcast_to_voice_channel_with_viewers(
         connected_clients,
         voice_channels,
-        {
-            "type": event_type,
-            "channel": channel_name,
-            "user": user_data_with_peer
-        },
-        {
-            "type": event_type,
-            "channel": channel_name,
-            "user": user_data_without_peer
-        },
+        msg, msg,
         channel_name
     )
 
@@ -1077,11 +1069,12 @@ async def handle(ws, message, server_data=None):
                 current_channel = getattr(ws, "voice_channel", None)
                 if current_channel:
                     if current_channel in voice_channels and user_id in voice_channels[current_channel]:
+                        msg = {"cmd": "voice_user_left", "channel": current_channel, "username": username}
                         await broadcast_to_voice_channel_with_viewers(
                             server_data["connected_clients"],
                             voice_channels,
-                            {"type": "voice_user_left", "channel": current_channel, "username": username},
-                            {"type": "voice_user_left", "channel": current_channel, "username": username},
+                            msg,
+                            msg,
                             current_channel
                         )
                         del voice_channels[current_channel][user_id]
@@ -1130,11 +1123,12 @@ async def handle(ws, message, server_data=None):
                 voice_channels = server_data.get("voice_channels", {})
                 username = getattr(ws, "username", users.get_username_by_id(user_id))
                 
+                msg = {"cmd": "voice_user_left", "channel": current_channel, "username": username}
                 await broadcast_to_voice_channel_with_viewers(
                     server_data["connected_clients"],
                     voice_channels,
-                    {"type": "voice_user_left", "channel": current_channel, "username": username},
-                    {"type": "voice_user_left", "channel": current_channel, "username": username},
+                    msg,
+                    msg,
                     current_channel
                 )
                 
