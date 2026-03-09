@@ -8,6 +8,13 @@ This file contains the main configuration for the OriginChats server. Below is a
 
 - **post_content**: *(int)*
   - Maximum number of characters allowed in a single message/post.
+- **search_results**: *(int)*
+  - Maximum number of results returned by `messages_search`.
+
+## uploads
+
+- **emoji_allowed_file_types**: *(list of str)*
+  - Allowed file extensions for custom emoji uploads.
 
 ## rate_limiting
 
@@ -63,6 +70,22 @@ This file contains the main configuration for the OriginChats server. Below is a
   - URL to the server icon image.
 - **url**: *(str)*
   - Public URL of the server.
+
+---
+
+## Adding New Config
+
+When adding a new config value, follow these 3 steps:
+
+1. Add the default value in `config_builder.py` under `DEFAULT_CONFIG`.
+2. If it should be set during setup, add a prompt in `setup.py` and pass the parsed value into `build_config(...)`.
+3. Read it in runtime code through `get_config_value(...)` from `config_store.py`, or through the local `_config_value(...)` helper in handlers when `server_data["config"]` is already available.
+
+Example:
+
+- Add `limits.search_results` in `config_builder.py`.
+- Prompt for it in `setup.py`.
+- Read it with `get_config_value("limits", "search_results", default=30)`.
 
 ---
 

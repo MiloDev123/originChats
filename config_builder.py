@@ -7,7 +7,7 @@ DEFAULT_CONFIG = {
         "search_results": 30,
     },
     "uploads": {
-        "emoji_allowed_file_types": ["gif", "jpg", "jpeg"],
+        "emoji_allowed_file_types": ["gif", "jpg", "jpeg", "png"],
     },
     "rate_limiting": {
         "enabled": True,
