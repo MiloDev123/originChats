@@ -234,10 +234,19 @@ async def handle(ws, message, server_data=None):
                         "user": replied_message.get("user")
                     }
 
+                # Add ping field if provided (for replies)
+                ping_field = message.get("ping")
+                if ping_field is not None:
+                    out_msg["ping"] = bool(ping_field)
+
                 channels.save_channel_message(channel_name, out_msg)
 
                 # Convert message to user format before sending (user ID -> username)
                 out_msg_for_client = channels.convert_messages_to_user_format([out_msg])[0]
+
+                # Include ping field if present
+                if "ping" in out_msg:
+                    out_msg_for_client["ping"] = out_msg["ping"]
 
                 # Get username for plugin event
                 username = users.get_username_by_id(user_id)
@@ -1597,6 +1606,90 @@ async def handle(ws, message, server_data=None):
 
                 banned_users = users.get_banned_users()
                 return {"cmd": "users_banned_list", "users": banned_users}
+            case "pings_get":
+                user_id, error = _require_user_id(ws, "Authentication required")
+                if error:
+                    return error
+
+                user_data = users.get_user(user_id)
+                if not user_data:
+                    return _error("User not found", match_cmd)
+
+                limit = message.get("limit", 50)
+                offset = message.get("offset", 0)
+
+                if not isinstance(limit, int) or limit < 1 or limit > 100:
+                    return _error("Limit must be a number between 1 and 100", match_cmd)
+                if not isinstance(offset, int) or offset < 0:
+                    return _error("Offset must be a non-negative number", match_cmd)
+
+                user_roles = user_data.get("roles", [])
+                username = user_data.get("username")
+
+                ping_patterns = [
+                    f"@{username}",
+                    f"@{username}@",
+                    f"@{username} "
+                ]
+
+                for role in user_roles:
+                    ping_patterns.append(f"@&{role}")
+                    ping_patterns.append(f"@&{role}@")
+                    ping_patterns.append(f"@&{role} ")
+
+                all_channels = channels.get_channels()
+                pinged_messages = []
+
+                for channel_data in all_channels:
+                    if channel_data.get("type") != "text":
+                        continue
+
+                    channel_name = channel_data.get("name")
+                    if not channels.does_user_have_permission(channel_name, user_roles, "view"):
+                        continue
+
+                    channel_messages = channels.get_channel_messages(channel_name, 0, 10000)
+                    if not channel_messages:
+                        continue
+
+                    for msg in channel_messages:
+
+                        is_mentioned_in_content = False
+                        content = msg.get("content", "")
+                        for pattern in ping_patterns:
+                            if pattern in content:
+                                is_mentioned_in_content = True
+                                break
+
+                        is_replied_to = False
+                        reply_to = msg.get("reply_to")
+                        if reply_to and reply_to.get("user") == user_id:
+                            is_replied_to = True
+
+                        ping_field = msg.get("ping", True)
+                        if is_replied_to and not ping_field:
+                            continue
+
+                        if is_mentioned_in_content or is_replied_to:
+                            pinged_messages.append((msg, channel_name))
+
+                pinged_messages.sort(key=lambda x: x[0].get("timestamp", 0), reverse=True)
+
+                paginated_messages = pinged_messages[offset:offset + limit]
+
+                result_messages = []
+                for msg, channel_name in paginated_messages:
+                    converted_msg = channels.convert_messages_to_user_format([msg])[0]
+                    converted_msg["channel"] = channel_name
+                    result_messages.append(converted_msg)
+
+                return {
+                    "cmd": "pings_get",
+                    "messages": result_messages,
+                    "offset": offset,
+                    "limit": limit,
+                    "total": len(pinged_messages)
+                }
             case "emoji_add":
                 user_id, error = _require_user_id(ws, "Authentication required")
                 if error:
