@@ -122,12 +122,6 @@ def main():
         ws_port = 5613
     
     print()
-    print("--- Rotur Integration ---")
-    print("Rotur is used for user authentication")
-    rotur_url = get_input("Rotur validation URL", "https://social.rotur.dev/validate")
-    rotur_key = get_input("Rotur validation key", "your_key_here")
-    
-    print()
     print("--- Content Limits ---")
     max_message_length = get_input("Maximum message length", "2000")
     
@@ -160,10 +154,6 @@ def main():
         "websocket": {
             "host": ws_host,
             "port": ws_port
-        },
-        "rotur": {
-            "validate_url": rotur_url,
-            "validate_key": rotur_key
         },
         "service": {
             "name": "OriginChats",

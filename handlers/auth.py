@@ -1,16 +1,15 @@
 import requests
 from db import users, roles
 from handlers.websocket_utils import send_to_client, broadcast_to_all
-import sys, random, string
+import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from logger import Logger
 
-async def handle_authentication(websocket, data, config_data, connected_clients, client_ip, server_data=None):
+async def handle_authentication(websocket, data, config_data, connected_clients, client_ip, server_data=None, validator_key=None):
     """Handle user authentication"""
     url = "https://api.rotur.dev/validate"
-    # generate a random string
-    key = "originChats-" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=10))
+    key = validator_key or ("originChats-" + config_data.get("rotur", {}).get("validate_key", ""))
     validator = data.get("validator")
     
     # Validate with rotur service
@@ -65,10 +64,21 @@ async def handle_authentication(websocket, data, config_data, connected_clients,
 
     # Ensure username is set in user data
     user["username"] = username
-    await send_to_client(websocket, {
+
+    # Generate a fresh validator token for this session and include it in the ready packet
+    validator_token = users.generate_validator(user_id)
+
+    # Strip internal fields from the user object before sending to client
+    user_for_client = {k: v for k, v in user.items() if k != "validator"}
+
+    ready_payload = {
         "cmd": "ready",
-        "user": user
-    })
+        "user": user_for_client
+    }
+    if validator_token:
+        ready_payload["validator"] = validator_token
+
+    await send_to_client(websocket, ready_payload)
 
     # Get the color of the first role for user_connect broadcast
     user_roles = user.get("roles", [])

@@ -189,11 +189,6 @@ async def handle(ws, message, server_data=None):
                 if not content:
                     return _error("Message content cannot be empty", match_cmd)
 
-                # Check message length limit from config
-                max_length = server_data.get("config", {}).get("limits", {}).get("post_content", 2000)
-                if len(content) > max_length:
-                    return _error(f"Message too long. Maximum length is {max_length} characters", match_cmd)
-
                 # Check rate limiting if enabled
                 if server_data and server_data.get("rate_limiter"):
                     is_allowed, reason, wait_time = server_data["rate_limiter"].is_allowed(user_id)
@@ -205,6 +200,20 @@ async def handle(ws, message, server_data=None):
                 user_roles = users.get_user_roles(user_id)
                 if not user_roles:
                     return _error("User roles not found", match_cmd)
+
+                # Check message length limit from config
+                max_length = server_data.get("config", {}).get("limits", {}).get("post_content", 2000)
+                if len(content) > max_length:
+                    return _error(f"Message too long. Maximum length is {max_length} characters", match_cmd)
+
+                # Check role mention permissions
+                import re
+                role_mentions = re.findall(r'@&([a-zA-Z0-9_]+)', content)
+                for mentioned_role in role_mentions:
+                    if not roles.role_exists(mentioned_role):
+                        continue
+                    if not roles.can_role_mention_role(user_roles, mentioned_role):
+                        return _error(f"You do not have permission to mention the '@&{mentioned_role}' role", match_cmd)
 
                 # Check if the user has permission to send messages in this channel
                 if not channels.does_user_have_permission(channel_name, user_roles, "send"):
@@ -1277,6 +1286,10 @@ async def handle(ws, message, server_data=None):
                     role_data["description"] = message["description"]
                 if message.get("color"):
                     role_data["color"] = message["color"]
+                if message.get("permissions"):
+                    role_data["permissions"] = message["permissions"]
+                if message.get("hoisted") is not None:
+                    role_data["hoisted"] = message["hoisted"]
 
                 if roles.role_exists(role_name):
                     return _error("Role already exists", match_cmd)
@@ -1315,6 +1328,8 @@ async def handle(ws, message, server_data=None):
                     role_data["description"] = message["description"]
                 if message.get("color") is not None:
                     role_data["color"] = message["color"]
+                if message.get("hoisted") is not None:
+                    role_data["hoisted"] = message["hoisted"]
 
                 updated = roles.update_role(role_name, role_data)
                 if server_data:
@@ -1366,12 +1381,47 @@ async def handle(ws, message, server_data=None):
                 user_id, error = _require_user_id(ws, "Authentication required")
                 if error:
                     return error
+
+                all_roles = roles.get_all_roles()
+                return {"cmd": "roles_list", "roles": all_roles}
+            case "role_permissions_set":
+                user_id, error = _require_user_id(ws, "Authentication required")
+                if error:
+                    return error
                 _, error = _require_user_roles(user_id, requiredRoles=["owner"])
                 if error:
                     return error
 
-                all_roles = roles.get_all_roles()
-                return {"cmd": "roles_list", "roles": all_roles}
+                role_name = message.get("name")
+                if not role_name:
+                    return _error("Role name is required", match_cmd)
+
+                if not roles.role_exists(role_name):
+                    return _error("Role not found", match_cmd)
+
+                permissions = message.get("permissions")
+                if not isinstance(permissions, dict):
+                    return _error("Permissions must be an object", match_cmd)
+
+                role_data = roles.get_role(role_name)
+                role_data["permissions"] = permissions
+                updated = roles.update_role(role_name, role_data)
+
+                return {"cmd": "role_permissions_set", "name": role_name, "permissions": permissions, "updated": updated}
+            case "role_permissions_get":
+                user_id, error = _require_user_id(ws, "Authentication required")
+                if error:
+                    return error
+
+                role_name = message.get("name")
+                if not role_name:
+                    return _error("Role name is required", match_cmd)
+
+                if not roles.role_exists(role_name):
+                    return _error("Role not found", match_cmd)
+
+                role_perms = roles.get_role_permissions(role_name)
+                return {"cmd": "role_permissions_get", "name": role_name, "permissions": role_perms}
             case "channel_create":
                 user_id, error = _require_user_id(ws, "Authentication required")
                 if error:

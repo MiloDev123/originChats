@@ -1,4 +1,4 @@
-import asyncio, websockets, json, os, mimetypes
+import asyncio, websockets, json, os, mimetypes, secrets
 from urllib.parse import urlsplit, unquote
 from websockets.datastructures import Headers
 from websockets.http11 import Response
@@ -156,6 +156,10 @@ class OriginChatsServer:
         heartbeat_task = asyncio.create_task(heartbeat(websocket, self.heartbeat_interval))
         
         try:
+            # Generate a unique validator key for this connection
+            connection_validator_key = "originChats-" + secrets.token_urlsafe(24)
+            websocket.validator_key = connection_validator_key
+
             # Send handshake message
             await send_to_client(websocket, {
                 "cmd": "handshake",
@@ -163,7 +167,7 @@ class OriginChatsServer:
                     "server": self.config["server"],
                     "limits": self.config["limits"],
                     "version": "1.1.0",
-                    "validator_key": "originChats-" + self.config["rotur"]["validate_key"]
+                    "validator_key": connection_validator_key
                 }
             })
                 
@@ -182,8 +186,9 @@ class OriginChatsServer:
                             "rate_limiter": self.rate_limiter
                         }
                         await handle_authentication(
-                            websocket, data, self.config, 
-                            self.connected_clients, client_ip, auth_server_data
+                            websocket, data, self.config,
+                            self.connected_clients, client_ip, auth_server_data,
+                            validator_key=getattr(websocket, "validator_key", None)
                         )
                         continue
 
