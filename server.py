@@ -21,6 +21,7 @@ class OriginChatsServer:
         
         # Server state
         self.connected_clients = set()
+        self.connected_usernames = {}
         self.version = self.config["service"]["version"]
         self.heartbeat_interval = 30
         self.main_event_loop = None
@@ -280,10 +281,17 @@ class OriginChatsServer:
                             Logger.info(f"Removed {len(command_names)} slash commands for connection {ws_id}")
                         del self.slash_commands[ws_id]
 
-                await broadcast_to_all(self.connected_clients, {
-                    "cmd": "user_disconnect",
-                    "username": username
-                })
+                    if username in self.connected_usernames:
+                        self.connected_usernames[username] -= 1
+                        if self.connected_usernames[username] <= 0:
+                            del self.connected_usernames[username]
+                            await broadcast_to_all(self.connected_clients, {
+                                "cmd": "user_disconnect",
+                                "username": username
+                            })
+                            Logger.success(f"Broadcast user_disconnect: {username}")
+                        else:
+                            Logger.info(f"User {username} still has {self.connected_usernames[username]} active connection(s)")
     
     async def broadcast_wrapper(self, message):
         """Wrapper for broadcast_to_all to maintain compatibility with watchers"""

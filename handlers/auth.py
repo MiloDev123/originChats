@@ -41,10 +41,11 @@ async def handle_authentication(websocket, data, config_data, connected_clients,
         return False
 
     # Create user if doesn't exist
-    if not users.user_exists(user_id):
+    is_new_user = not users.user_exists(user_id)
+    if is_new_user:
         users.add_user(user_id, username)
         Logger.add(f"User {username} (ID: {user_id}) created")
-    
+
     # Update username if it has changed
     existing_user = users.get_user(user_id)
     if existing_user and existing_user.get("username") != username:
@@ -67,7 +68,7 @@ async def handle_authentication(websocket, data, config_data, connected_clients,
         "cmd": "ready",
         "user": user
     })
-    
+
     # Get the color of the first role for user_connect broadcast
     user_roles = user.get("roles", [])
     color = None
@@ -76,8 +77,30 @@ async def handle_authentication(websocket, data, config_data, connected_clients,
         first_role_data = roles.get_role(first_role_name)
         if first_role_data:
             color = first_role_data.get("color")
-    
+
     # Broadcast user connection to all clients (send username, not ID)
+    if is_new_user:
+        await broadcast_to_all(connected_clients, {
+            "cmd": "user_join",
+            "user": {
+                "username": username,
+                "roles": user.get("roles"),
+                "color": color
+            }
+        })
+        Logger.success(f"Broadcast user_join: {username} joined the server")
+
+        # Plugin event
+        if server_data and "plugin_manager" in server_data:
+            server_data["plugin_manager"].trigger_event("user_join", websocket, {
+                "username": username,
+                "user_id": user_id,
+                "roles": user.get("roles"),
+                "color": color,
+                "user": user
+            }, server_data)
+
+    # Broadcast user_connect for every connection (client broadcast only)
     await broadcast_to_all(connected_clients, {
         "cmd": "user_connect",
         "user": {
@@ -86,8 +109,14 @@ async def handle_authentication(websocket, data, config_data, connected_clients,
             "color": color
         }
     })
-    
-    # Trigger user_connect event for plugins
+
+    # Track connection count in server data
+    if server_data and "connected_usernames" in server_data:
+        connected_usernames = server_data["connected_usernames"]
+        if username not in connected_usernames:
+            connected_usernames[username] = 0
+        connected_usernames[username] += 1
+
     if server_data and "plugin_manager" in server_data:
         server_data["plugin_manager"].trigger_event("user_connect", websocket, {
             "username": username,

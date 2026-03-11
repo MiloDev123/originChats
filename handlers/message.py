@@ -736,19 +736,33 @@ async def handle(ws, message, server_data=None):
                 user_id, error = _require_user_id(ws, "Authentication required")
                 if error:
                     return error
-                
+
                 if not server_data or "connected_clients" not in server_data:
                     return _error("Server data not available", match_cmd)
-                
+
                 username = users.get_username_by_id(user_id)
-                
-                server_data["connected_clients"].discard(ws)  # Use discard instead of remove to avoid KeyError
-                users.remove_user(user_id)
-                server_data["plugin_manager"].trigger_event("user_left", ws, {
-                    "user_id": user_id,
+
+                if not users.is_user_banned(user_id):
+                    users.remove_user(user_id)
+                    Logger.success(f"User {username} (ID: {user_id}) removed from database")
+                else:
+                    Logger.warning(f"User {username} (ID: {user_id}) is banned, keeping in database")
+
+                connected_clients = server_data["connected_clients"]
+                await broadcast_to_all(connected_clients, {
+                    "cmd": "user_leave",
                     "username": username
-                }, server_data)
-                return {"cmd": "user_leave", "user": username, "val": "User left server", "global": True}
+                })
+
+                if "plugin_manager" in server_data:
+                    server_data["plugin_manager"].trigger_event("user_leave", ws, {
+                        "username": username,
+                        "user_id": user_id
+                    }, server_data)
+
+                Logger.success(f"Broadcast user_leave: {username} left the server")
+
+                return {"cmd": "user_leave", "user": username, "val": "User left server"}
             case "users_list":
                 # Handle request for all users list
                 _, error = _require_user_id(ws)
