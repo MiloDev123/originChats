@@ -103,12 +103,15 @@ class OriginChatsServer:
 
     def _normalize_public_base_url(self):
         base_url = self.config.get("server", {}).get("url")
+
         if base_url:
-            if base_url.startswith("ws://"):
-                return "http://" + base_url[len("ws://"):].rstrip("/")
-            if base_url.startswith("wss://"):
-                return "https://" + base_url[len("wss://"):].rstrip("/")
-            return "https://" + base_url.rstrip("/")
+            base_url = base_url.strip().lower()
+
+            secure = base_url.startswith("wss://") or base_url.startswith("https://")
+            base_url = base_url.split("://", 1)[-1]
+
+            suffix = "s" if secure else ""
+            return f"http{suffix}://{base_url.rstrip('/')}"
 
         host = self.config.get("websocket", {}).get("host", "127.0.0.1")
         port = self.config.get("websocket", {}).get("port", 5613)
