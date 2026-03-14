@@ -4,6 +4,7 @@ import os
 import threading
 from typing import Dict, List, Optional
 from . import users
+from . import threads
 import emoji
 
 _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -17,7 +18,8 @@ DEFAULT_CHANNELS = [
         "permissions": {
             "view": ["user"],
             "send": ["user"],
-            "delete": ["admin", "moderator"]
+            "delete": ["admin", "moderator"],
+            "create_thread": ["user"]
         }
     }
 ]
@@ -261,7 +263,7 @@ def _ensure_storage():
     channels = _get_channels_cache()
 
     for channel in channels:
-        if channel.get("type") not in ["text", "voice"]:
+        if channel.get("type") not in ["text", "voice", "forum"]:
             continue
         channel_name = channel.get("name")
         if not channel_name:
@@ -467,13 +469,18 @@ def get_all_channels_for_roles(roles):
         list: A list of channel info dicts available for the specified roles.
     """
     with _lock:
-        channels = []
+        result = []
         for channel in _get_channels_cache():
             permissions = channel.get("permissions", {})
             view_roles = permissions.get("view", [])
             if any(role in view_roles for role in roles):
-                channels.append(copy.deepcopy(channel))
-        return channels
+                channel_copy = copy.deepcopy(channel)
+                if channel_copy.get("type") == "forum":
+                    channel_name: str = channel_copy.get("name", "")
+                    if channel_name:
+                        channel_copy["threads"] = threads.get_channel_threads(channel_name)
+                result.append(channel_copy)
+        return result
 
 
 def edit_channel_message(channel_name, message_id, new_content):

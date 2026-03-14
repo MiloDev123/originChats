@@ -1,4 +1,4 @@
-from db import channels, users, roles, serverEmojis
+from db import channels, users, roles, serverEmojis, threads
 import time, uuid, sys, os, asyncio, json, re
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from logger import Logger
@@ -179,14 +179,15 @@ async def handle(ws, message, server_data=None):
                     return _error("Server data not available", match_cmd)
                 # Handle chat message
                 channel_name = message.get("channel")
+                thread_id = message.get("thread_id")
                 content = message.get("content")
-                reply_to = message.get("reply_to")  # Optional: ID of message being replied to
+                reply_to = message.get("reply_to")
                 user_id = getattr(ws, 'user_id', None)
 
-                if not channel_name or not content or not user_id:
+                if (not channel_name and not thread_id) or not content or not user_id:
                     missing_fields = []
-                    if not channel_name:
-                        missing_fields.append("channel")
+                    if not channel_name and not thread_id:
+                        missing_fields.append("channel or thread_id")
                     if not content:
                         missing_fields.append("content")
                     if not user_id:
@@ -228,21 +229,41 @@ async def handle(ws, message, server_data=None):
                         return _error(f"You do not have permission to mention the '@&{mentioned_role}' role", match_cmd)
 
                 # Check if the user has permission to send messages in this channel
-                if not channels.does_user_have_permission(channel_name, user_roles, "send"):
-                    return _error("You do not have permission to send messages in this channel", match_cmd)
+                if thread_id:
+                    thread_data = threads.get_thread(thread_id)
+                    if not thread_data:
+                        return _error("Thread not found", match_cmd)
+                    if threads.is_thread_locked(thread_id):
+                        return _error("This thread is locked", match_cmd)
+                    if threads.is_thread_archived(thread_id):
+                        return _error("This thread is archived", match_cmd)
+                    parent_channel = thread_data.get("parent_channel")
+                    if not channels.does_user_have_permission(parent_channel, user_roles, "send"):
+                        return _error("You do not have permission to send messages in this thread", match_cmd)
+                else:
+                    if not channels.does_user_have_permission(channel_name, user_roles, "send"):
+                        return _error("You do not have permission to send messages in this channel", match_cmd)
 
-                # Validate reply_to if provided
+                    # Check if channel is a forum channel (can't send messages directly)
+                    channel_info = channels.get_channel(channel_name)
+                    if channel_info and channel_info.get("type") == "forum":
+                        return _error("Cannot send messages directly in forum channels. Use threads instead.", match_cmd)
+
+# Validate reply_to if provided
                 replied_message = None
                 if reply_to:
-                    replied_message = channels.get_channel_message(channel_name, reply_to)
+                    if thread_id:
+                        replied_message = threads.get_thread_message(thread_id, reply_to)
+                    else:
+                        replied_message = channels.get_channel_message(channel_name, reply_to)
                     if not replied_message:
                         return _error("The message you're trying to reply to was not found", match_cmd)
 
-                # Save the message to the channel (store user ID)
+                # Save the message
                 out_msg = {
                     "user": user_id,
                     "content": content,
-                    "timestamp": time.time(),  # Use current timestamp
+                    "timestamp": time.time(),
                     "type": "message",
                     "pinned": False,
                     "id": str(uuid.uuid4())
@@ -260,10 +281,12 @@ async def handle(ws, message, server_data=None):
                 if ping_field is not None:
                     out_msg["ping"] = bool(ping_field)
 
-                channels.save_channel_message(channel_name, out_msg)
-
-                # Convert message to user format before sending (user ID -> username)
-                out_msg_for_client = channels.convert_messages_to_user_format([out_msg])[0]
+                if thread_id:
+                    threads.save_thread_message(thread_id, out_msg)
+                    out_msg_for_client = threads.convert_messages_to_user_format([out_msg])[0]
+                else:
+                    channels.save_channel_message(channel_name, out_msg)
+                    out_msg_for_client = channels.convert_messages_to_user_format([out_msg])[0]
 
                 # Include ping field if present
                 if "ping" in out_msg:
@@ -308,7 +331,10 @@ async def handle(ws, message, server_data=None):
                             )
 
                 # Optionally broadcast to all clients
-                return {"cmd": "message_new", "message": out_msg_for_client, "channel": channel_name, "global": True}
+                if thread_id:
+                    return {"cmd": "message_new", "message": out_msg_for_client, "thread_id": thread_id, "global": True}
+                else:
+                    return {"cmd": "message_new", "message": out_msg_for_client, "channel": channel_name, "global": True}
             case "typing":
                 # Handle typing
                 user_id, error = _require_user_id(ws)
@@ -1908,5 +1934,155 @@ async def handle(ws, message, server_data=None):
                 return await push_handler.handle_push_subscribe(ws, message)
             case "push_unsubscribe":
                 return await push_handler.handle_push_unsubscribe(ws, message)
+            case "thread_create":
+                user_id, error = _require_user_id(ws, "Authentication required")
+                if error:
+                    return error
+
+                channel_name = message.get("channel")
+                thread_name = message.get("name")
+
+                if not channel_name or not thread_name:
+                    return _error("Channel and thread name are required", match_cmd)
+
+                user_roles = users.get_user_roles(user_id)
+                if not user_roles:
+                    return _error("User roles not found", match_cmd)
+
+                channel_info = channels.get_channel(channel_name)
+                if not channel_info:
+                    return _error("Channel not found", match_cmd)
+
+                if channel_info.get("type") != "forum":
+                    return _error("Threads can only be created in forum channels", match_cmd)
+
+                if not channels.does_user_have_permission(channel_name, user_roles, "create_thread"):
+                    return _error("You do not have permission to create threads in this channel", match_cmd)
+
+                thread_name = thread_name.strip()
+                if not thread_name:
+                    return _error("Thread name cannot be empty", match_cmd)
+
+                if not user_id:
+                    return _error("User not authenticated", match_cmd)
+
+                username = users.get_username_by_id(user_id)
+                thread_data = threads.create_thread(channel_name, thread_name, user_id)
+
+                return {"cmd": "thread_create", "thread": thread_data, "channel": channel_name, "global": True}
+            case "thread_get":
+                user_id, error = _require_user_id(ws, "Authentication required")
+                if error:
+                    return error
+
+                thread_id = message.get("thread_id")
+                if not thread_id:
+                    return _error("Thread ID is required", match_cmd)
+
+                thread_data = threads.get_thread(thread_id)
+                if not thread_data:
+                    return _error("Thread not found", match_cmd)
+
+                user_roles = users.get_user_roles(user_id)
+                if not user_roles:
+                    return _error("User roles not found", match_cmd)
+
+                if not channels.does_user_have_permission(thread_data.get("parent_channel"), user_roles, "view"):
+                    return _error("You do not have permission to view this thread", match_cmd)
+
+                thread_data["created_by"] = users.get_username_by_id(thread_data.get("created_by"))
+                return {"cmd": "thread_get", "thread": thread_data}
+            case "thread_messages":
+                user_id, error = _require_user_id(ws, "Authentication required")
+                if error:
+                    return error
+
+                thread_id = message.get("thread_id")
+                start = message.get("start")
+                limit = message.get("limit", 100)
+
+                if not thread_id:
+                    return _error("Thread ID is required", match_cmd)
+
+                thread_data = threads.get_thread(thread_id)
+                if not thread_data:
+                    return _error("Thread not found", match_cmd)
+
+                user_roles = users.get_user_roles(user_id)
+                if not user_roles:
+                    return _error("User roles not found", match_cmd)
+
+                if not channels.does_user_have_permission(thread_data.get("parent_channel"), user_roles, "view"):
+                    return _error("You do not have permission to view this thread", match_cmd)
+
+                messages = threads.get_thread_messages(thread_id, start, limit)
+                converted_messages = threads.convert_messages_to_user_format(messages)
+
+                return {"cmd": "thread_messages", "thread_id": thread_id, "messages": converted_messages}
+            case "thread_delete":
+                user_id, error = _require_user_id(ws, "Authentication required")
+                if error:
+                    return error
+
+                thread_id = message.get("thread_id")
+                if not thread_id:
+                    return _error("Thread ID is required", match_cmd)
+
+                thread_data = threads.get_thread(thread_id)
+                if not thread_data:
+                    return _error("Thread not found", match_cmd)
+
+                user_roles = users.get_user_roles(user_id)
+                if not user_roles:
+                    return _error("User roles not found", match_cmd)
+
+                is_owner = thread_data.get("created_by") == user_id
+                is_admin = "owner" in user_roles or "admin" in user_roles
+
+                if not is_owner and not is_admin:
+                    return _error("You do not have permission to delete this thread", match_cmd)
+
+                threads.delete_thread(thread_id)
+                return {"cmd": "thread_delete", "thread_id": thread_id, "channel": thread_data.get("parent_channel"), "global": True}
+            case "thread_update":
+                user_id, error = _require_user_id(ws, "Authentication required")
+                if error:
+                    return error
+
+                thread_id = message.get("thread_id")
+                if not thread_id:
+                    return _error("Thread ID is required", match_cmd)
+
+                thread_data = threads.get_thread(thread_id)
+                if not thread_data:
+                    return _error("Thread not found", match_cmd)
+
+                user_roles = users.get_user_roles(user_id)
+                if not user_roles:
+                    return _error("User roles not found", match_cmd)
+
+                is_owner = thread_data.get("created_by") == user_id
+                is_admin = "owner" in user_roles or "admin" in user_roles
+
+                if not is_owner and not is_admin:
+                    return _error("You do not have permission to update this thread", match_cmd)
+
+                updates = {}
+                if "name" in message:
+                    name = message["name"].strip()
+                    if name:
+                        updates["name"] = name
+                    else:
+                        return _error("Thread name cannot be empty", match_cmd)
+                if "locked" in message and is_admin:
+                    updates["locked"] = bool(message["locked"])
+                if "archived" in message:
+                    updates["archived"] = bool(message["archived"])
+
+                if updates:
+                    threads.update_thread(thread_id, updates)
+
+                updated_thread = threads.get_thread(thread_id)
+                return {"cmd": "thread_update", "thread": updated_thread, "global": True}
             case _:
                 return _error(f"Unknown command: {message.get('cmd')}", match_cmd)

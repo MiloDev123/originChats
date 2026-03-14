@@ -3,23 +3,25 @@
 **Request:**
 ```json
 {
-  "cmd": "message_new",
-  "channel": "<channel_name>",
-  "content": "<message_content>",
-  "reply_to": "<optional_message_id>",
-  "ping": true
+    "cmd": "message_new",
+    "channel": "<channel_name>",
+    "thread_id": "<optional_thread_id>",
+    "content": "<message_content>",
+    "reply_to": "<optional_message_id>",
+    "ping": true
 }
 ```
 
 ### Fields
 
-- `channel`: Name of the channel to send the message to.
+- `channel`: Name of the channel to send the message to. Required unless `thread_id` is provided.
+- `thread_id`: (Optional) ID of the thread to send the message to. If provided, message is sent to the thread instead of the channel.
 - `content`: Message text (required, trimmed, max length enforced by config).
 - `reply_to`: (Optional) ID of the message being replied to.
 - `ping`: (Optional) Whether to notify the user being replied to. Defaults to `true`. Only applies when using `reply_to`.
 
 **Response:**
-- On success:
+- On success (channel message):
 ```json
 {
   "cmd": "message_new",
@@ -41,6 +43,23 @@
 }
 ```
 
+- On success (thread message):
+```json
+{
+  "cmd": "message_new",
+  "message": {
+    "id": "message-uuid",
+    "user": "username",
+    "content": "Message content here",
+    "timestamp": 1773182676.073865,
+    "type": "message",
+    "pinned": false
+  },
+  "thread_id": "<thread_id>",
+  "global": true
+}
+```
+
 - On error: see [common errors](errors.md).
 
 **Notes:**
@@ -52,5 +71,7 @@
   - If `ping` is `false`: The reply will NOT be included in `pings_get` for the user being replied to
   - This allows users to reply without notifying/pinging the original poster
 - The `ping` field is only included in the response if explicitly provided in the request; it defaults to `true` for `pings_get` lookups
+- **Forum Channels:** Cannot send messages directly to forum channels. Use `thread_id` to send messages to threads within forum channels.
+- **Thread Messages:** When sending to a thread, the thread must not be locked or archived.
 
 See implementation: [`handlers/message.py`](../handlers/message.py) (search for `case "message_new":`).
