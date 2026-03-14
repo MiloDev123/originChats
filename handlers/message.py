@@ -52,6 +52,10 @@ def _require_text_channel_access(user_id, channel_name):
     if channel_name not in allowed_text_channel_names:
         return None, _error("Access denied to this channel", None)
 
+    channel_info = channels.get_channel(channel_name)
+    if channel_info and channel_info.get("type") != "text":
+        return None, _error("Cannot use this command in this channel type", None)
+
     return user_data, None
 
 def _validate_type(value, expected_type):
@@ -244,10 +248,10 @@ async def handle(ws, message, server_data=None):
                     if not channels.does_user_have_permission(channel_name, user_roles, "send"):
                         return _error("You do not have permission to send messages in this channel", match_cmd)
 
-                    # Check if channel is a forum channel (can't send messages directly)
-                    channel_info = channels.get_channel(channel_name)
-                    if channel_info and channel_info.get("type") == "forum":
-                        return _error("Cannot send messages directly in forum channels. Use threads instead.", match_cmd)
+# Check if channel type is valid for sending messages (text only, not forum/voice)
+            channel_info = channels.get_channel(channel_name)
+            if channel_info and channel_info.get("type") != "text":
+                return _error("Cannot send messages in this channel type", match_cmd)
 
 # Validate reply_to if provided
                 replied_message = None

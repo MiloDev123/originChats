@@ -56,6 +56,26 @@ No additional parameters required.
         }
       ]
     }
+    {
+      "name": "tickets",
+      "type": "forum",
+      "description": "Report things!",
+      "permissions": {
+        "view": ["user"],
+        "create_thread": ["user"]
+      },
+      "threads": [
+        {
+          "id": "uuid-here",
+          "name": "Welcome to the server!",
+          "parent_channel": "tickets",
+          "created_by": "admin",
+          "created_at": 1234567890.123,
+          "locked": false,
+          "archived": false
+        }
+      ]
+    }
     // ... more channels
   ]
 }
@@ -64,7 +84,7 @@ No additional parameters required.
 ### Channel Object Fields
 
 - `name`: Unique channel identifier (string)
-- `type`: Channel type - either `"text"` or `"voice"`
+- `type`: Channel type - either `"text"` or `"voice"` or `"forum"`
 - `display_name`: Display name for UI (optional)
 - `icon`: HTTP/HTTPS URL for channel icon (optional)
 - `description`: Channel description (optional)
@@ -76,7 +96,8 @@ No additional parameters required.
   - `edit_own`: Roles that can edit their own messages
   - `react`: Roles that can add/remove reactions (optional)
   - `pin`: Roles that can pin messages (optional)
-- `voice_state`: (**Only on voice channels where you're a participant**) Array of other users currently in the voice channel
+- `voice_state`: (**Only on voice channels**) Array of other users currently in the voice channel
+- `threads`: (**Only on forum channels**) Array of threads in the channel
 
 ### Voice State Fields
 
