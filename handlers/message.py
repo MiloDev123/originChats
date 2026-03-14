@@ -263,6 +263,58 @@ async def handle(ws, message, server_data=None):
                     if not replied_message:
                         return _error("The message you're trying to reply to was not found", match_cmd)
 
+                url_pattern = r'(https?://[^\s]+)'
+                found_links = re.findall(url_pattern, content)
+
+                # Allowed media file extensions
+                MEDIA_EXTENSIONS = (
+                    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg",
+                    ".mp4", ".webm", ".mov", ".avi", ".mkv",
+                    ".mp3", ".wav", ".ogg", ".flac",
+                    ".pdf"
+                )
+
+                # Domains that should ALWAYS be proxied
+                FORCE_PROXY_DOMAINS = (
+                    "photos.rotur.dev",
+                )
+
+                if found_links:
+                    try:
+                        with open("/root/cdnmappings.json", "r") as f:
+                            mappings = json.load(f)
+                            if not isinstance(mappings, list):
+                                mappings = []
+                    except (FileNotFoundError, json.JSONDecodeError):
+                        mappings = []
+
+                    for link in found_links:
+                        # Skip if already using your CDN
+                        if link.startswith("https://roturcdn.milosantos.com/"):
+                            continue
+
+                        # Strip query params/fragments before checking extension
+                        clean_link = link.split("?")[0].split("#")[0].lower()
+
+                        try:
+                            domain = clean_link.split("/")[2]
+                        except IndexError:
+                            continue
+
+                        # Check if it's media OR forced domain
+                        is_media = clean_link.endswith(MEDIA_EXTENSIONS)
+                        is_forced = domain in FORCE_PROXY_DOMAINS
+
+                        if not (is_media or is_forced):
+                            continue
+
+                        new_uuid = str(uuid.uuid4())
+                        mappings.append({new_uuid: link})
+                        content = content.replace(link, f"https://roturcdn.milosantos.com/{new_uuid}", 1)
+
+                    with open("/root/cdnmappings.json", "w") as f:
+                        json.dump(mappings, f, indent=4)
+                
                 # Save the message
                 out_msg = {
                     "user": user_id,
